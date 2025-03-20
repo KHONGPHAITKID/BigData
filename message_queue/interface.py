@@ -18,7 +18,8 @@ class Message:
         return {
             "id": self.id,
             "content": self.content,
-            "metadata": self.metadata or {}
+            "produce_time": self.produce_time,
+            "consume_time": self.consume_time
         }
     
     @classmethod
@@ -27,7 +28,8 @@ class Message:
         return cls(
             id=data.get("id", ""),
             content=data.get("content"),
-            metadata=data.get("metadata", {})
+            produce_time=data.get("produce_time"),
+            consume_time=data.get("consume_time")
         )
 
 
