@@ -18,9 +18,9 @@ class Benchmark:
         # self.message_queue.connect()
         self.message_queue.set_stats(Stats())
 
+        self.message_queue.consume()  # Stats recorded here
         for _ in range(50):  # Number of iterations
             produce_time = datetime.now()
             messages = self.create_payload(size=10, produce_time=produce_time)
             self.message_queue.produce(messages)
-            self.message_queue.consume()  # Stats recorded here
         self.message_queue.close()
