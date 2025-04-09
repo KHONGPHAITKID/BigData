@@ -6,9 +6,17 @@
 from benchmark.benchmark import Benchmark
 from benchmark.stats import Stats
 from message_queue.kafka import KafkaMessageQueue, KafkaTopicManager
+import os
 
-broker = "localhost:9093"
-# broker = "kafka:9092"
+# Get broker address from environment variable, with fallback logic
+# Use KAFKA_BROKER env var if set, otherwise determine based on environment
+broker = os.environ.get('KAFKA_BROKER')
+if not broker:
+    # Logic to detect if running inside Docker
+    is_docker = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER') == 'true'
+    broker = "kafka:9092" if is_docker else "localhost:9093"
+
+print(f"Using Kafka broker: {broker}")
 
 # Configuration for Kafka (adjust as needed)
 config = {
