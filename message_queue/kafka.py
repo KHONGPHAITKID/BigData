@@ -7,7 +7,16 @@ from message_queue.interface import MessageQueueBase, Message
 from confluent_kafka.admin import AdminClient, NewTopic
 import logging
 import threading  # Changed from 'from threading import Thread' to import the whole module
-from threading import Lock
+from threading import Lock    
+
+# Create a ConsumerWrapper class to store consumer and its status
+class ConsumerWrapper:
+    def __init__(self, client, active=True, connected=False):
+        self.client = client
+        self.active = active
+        self.connected = connected
+        self.consumed_messages = []
+
 
 class KafkaMessageQueue(MessageQueueBase):
     """
@@ -19,11 +28,9 @@ class KafkaMessageQueue(MessageQueueBase):
         self.producer = None
         self.consumers = []
         self.topic = None
-        self.consumer_count = 5
-        self.messages = []  # Buffer for consumed messages
         self.consumer_threads = []
-        self.running = False
-        self.lock = Lock()
+        self.consuming = False
+        self.consume_timeout = 10  # Default timeout in seconds
 
     def connect(self, config: Dict[str, Any]) -> bool:
         """
@@ -47,9 +54,14 @@ class KafkaMessageQueue(MessageQueueBase):
                 raise ValueError("Consumer configuration must include 'group.id'")
             
             self.producer = Producer(producer_config)
-            self.consumers = [Consumer(consumer_config) for _ in range(self.consumer_count)]
+            self.consumer_count = config['partition']
+            
+            
+            # Initialize consumers list with ConsumerWrapper instances
+            self.consumers = [ConsumerWrapper(Consumer(consumer_config)) for _ in range(self.consumer_count)]
             for i in range(self.consumer_count):
-                self.consumers[i].subscribe([self.topic])
+                self.consumers[i].client.subscribe([self.topic])
+                self.consumers[i].connected = True
             
             self.connected = True
             logging.info("Successfully connected to Kafka")
@@ -59,14 +71,25 @@ class KafkaMessageQueue(MessageQueueBase):
             self.connected = False
             return False
 
-    def _consumer_loop(self, consumer: Consumer):
+    def _consumer_loop(self, consumer: ConsumerWrapper):
         """Individual consumer processing loop"""
         logging.info(f"Starting consumer loop for {threading.current_thread().name}")  # Fixed
         print(f"Starting consumer loop for {threading.current_thread().name}")  # Fixed
         
-        while self.running:
+        while self.consuming:
+            if not consumer.active:
+                if consumer.connected:
+                    consumer.client.close()
+                    consumer.connected = False
+                    print(f"Consumer {threading.current_thread().name} quit")
+                continue
+
+            if not consumer.connected:
+                consumer.client.subscribe([self.topic])
+                consumer.connected = True
+                print(f"Consumer {threading.current_thread().name} rejoined")
             try:
-                msg = consumer.poll(timeout=1.0)
+                msg = consumer.client.poll(timeout=2.0)
                 if msg is None:
                     continue
                 if msg.error():
@@ -88,8 +111,7 @@ class KafkaMessageQueue(MessageQueueBase):
                     produce_time=produce_time,
                     consume_time=consume_time
                 )
-                with self.lock:
-                    self.messages.append(message)  # Store messages for return
+                consumer.consumed_messages.append(message)  # Store messages for return
                 
                 if produce_time and consume_time and self.stats:
                     latency = (consume_time - produce_time).total_seconds()
@@ -124,7 +146,6 @@ class KafkaMessageQueue(MessageQueueBase):
         try:
             for msg in messages:
                 # Serialize datetime fields to ISO format strings or None
-                print("Produce message " + msg.id)
                 msg_dict = {
                     "id": msg.id,
                     "content": msg.content,
@@ -139,12 +160,10 @@ class KafkaMessageQueue(MessageQueueBase):
             logging.error(f"Failed to produce messages: {e}")
             return False
 
-    def consume(self) -> List[Message]:
+    def consume(self):
         """
-        Consume messages from the Kafka topic.
-
-        Returns:
-            List[Message]: List of consumed Message objects.
+        Start consuming messages from the Kafka topic in background threads.
+        This is non-blocking.
         """
         if not self.connected:
             raise RuntimeError("Not connected to Kafka")
@@ -152,7 +171,7 @@ class KafkaMessageQueue(MessageQueueBase):
         logging.info("Starting consumption")
         print("Starting consumption")
         
-        self.running = True
+        self.consuming = True
         self.consumer_threads = []
         for idx, consumer in enumerate(self.consumers):
             logging.info(f"Creating thread for consumer {idx}")
@@ -160,19 +179,35 @@ class KafkaMessageQueue(MessageQueueBase):
             t = threading.Thread(
                 target=self._consumer_loop,
                 args=(consumer,),
-                daemon=False,
+                daemon=True,  # Make threads daemon so they don't block program exit
                 name=f"Consumer-{idx}"
             )
             t.start()
             self.consumer_threads.append(t)
+
+    def stop_consumer(self, index: int) -> None:
+        """
+        Stop a consumer.
+        """
+        if index >= len(self.consumers):
+            return
+        self.consumers[index].active = False
+    
+    def get_consumed_messages(self) -> List[Message]:
+        """
+        Get all messages that have been consumed so far.
+        This doesn't stop the consumption threads.
         
-        # Wait longer to allow message consumption
-        time.sleep(5)  # Increased from 1 to 5 seconds
-        with self.lock:
-            messages = self.messages.copy()
-            self.messages.clear()
-        logging.info(f"Consumed {len(messages)} messages")
-        print(f"Consumed {len(messages)} messages")
+        Returns:
+            List[Message]: List of consumed Message objects.
+        """
+        messages = []
+        for consumer in self.consumers:
+            messages.extend(consumer.consumed_messages.copy())
+            consumer.consumed_messages = []
+
+        logging.info(f"Retrieved {len(messages)} consumed messages")
+        print(f"Retrieved {len(messages)} consumed messages")
         return messages
     
     def close(self) -> bool:
@@ -184,7 +219,7 @@ class KafkaMessageQueue(MessageQueueBase):
         """
         logging.info("Closing Kafka connections")
         print("Closing Kafka connections")
-        self.running = False
+        self.consuming = False
         try:
             for thread in self.consumer_threads:
                 thread.join(timeout=2.0)
@@ -198,7 +233,7 @@ class KafkaMessageQueue(MessageQueueBase):
             if self.consumers:
                 for consumer in self.consumers:
                     try:
-                        consumer.close()
+                        consumer.client.close()
                     except Exception as e:
                         logging.error(f"Error closing consumer: {e}")
                 self.consumers.clear()
@@ -215,7 +250,7 @@ class KafkaTopicManager:
     """
     Manages Kafka topics including creation and partition checks.
     """
-    def __init__(self, bootstrap_servers='kafka:9092'):
+    def __init__(self, bootstrap_servers='localhost:9093'):
         self.admin_client = AdminClient({'bootstrap.servers': bootstrap_servers})
 
     def create_topic(self, topic_name: str, num_partitions=5, replication_factor=1) -> bool:

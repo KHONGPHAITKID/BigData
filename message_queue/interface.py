@@ -40,6 +40,7 @@ class MessageQueueBase(ABC):
     def __init__(self):
         self.connected = False
         self.stats = None
+        self.consumer_count = -1
     
     @abstractmethod
     def connect(self, config: Dict[str, Any]) -> bool:
@@ -115,3 +116,17 @@ class MessageQueueBase(ABC):
             bool: True if connected, False otherwise
         """
         return self.connected
+
+    def stop_consumer(self, index: int) -> None:
+        """
+        Stop a consumer.
+        """
+        
+        pass
+
+    def get_consumed_messages(self) -> List[Message]:
+        """
+        Get the consumed messages.
+        """
+        pass
+        

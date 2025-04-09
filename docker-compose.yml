@@ -31,4 +31,7 @@ services:
       - kafka
     volumes:
       - .:/app
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - DOCKER_CONTAINER=true
     command: tail -f /dev/null
