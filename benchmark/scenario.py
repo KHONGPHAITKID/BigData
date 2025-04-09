@@ -4,11 +4,13 @@ from benchmark.utils import BenchmarkUtils
 from message_queue.interface import Message
 from typing import List
 import time
+import random
 
 class Scenario(ABC):
 
     def __init__(self, benchmark_utils: BenchmarkUtils = None):
         self.benchmark_utils = benchmark_utils
+        self.scenario_name = None
 
     @abstractmethod
     def run(self) -> List[Message]:
@@ -18,6 +20,11 @@ class Scenario(ABC):
         self.benchmark_utils = benchmark_utils
 
 class LowThroughputScenario(Scenario):
+
+    def __init__(self, benchmark_utils: BenchmarkUtils = None):
+        super().__init__(benchmark_utils)
+        self.scenario_name = "Low_Throughput"
+
     def run(self) -> List[Message]:
         self.benchmark_utils.message_queue.consume()
 
@@ -30,13 +37,17 @@ class LowThroughputScenario(Scenario):
         
         self.benchmark_utils.message_queue.running = False
         consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
-        print(f"Benchmark complete. Consumed {len(consumed_messages)} messages.")
-        self.benchmark_utils.message_queue.close()
+        print(f"Low throughput benchmark complete. Consumed {len(consumed_messages)} messages.")
         self.benchmark_utils.message_queue.get_stats().draw_histogram("latency")
 
         return consumed_messages
     
-class HighThroughputScenario(Scenario):
+class MediumThroughputScenario(Scenario):
+
+    def __init__(self, benchmark_utils: BenchmarkUtils = None):
+        super().__init__(benchmark_utils)
+        self.scenario_name = "Medium_Throughput"
+
     def run(self) -> List[Message]:
         self.benchmark_utils.message_queue.consume()
 
@@ -47,12 +58,64 @@ class HighThroughputScenario(Scenario):
             self.benchmark_utils.message_queue.produce(messages)
             time.sleep(0.01)  # Small delay between batches to prevent overwhelming the system
 
-        time.sleep(30)  # Increased wait time to allow more messages to be processed
+        time.sleep(20)  # Increased wait time to allow more messages to be processed
+        
+        self.benchmark_utils.message_queue.running = False
+        consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
+        print(f"Medium throughput benchmark complete. Consumed {len(consumed_messages)} messages.")
+        self.benchmark_utils.message_queue.get_stats().draw_histogram("latency")
+
+        return consumed_messages
+    
+class HighThroughputScenario(Scenario):
+    def __init__(self, benchmark_utils: BenchmarkUtils = None):
+        super().__init__(benchmark_utils)
+        self.scenario_name = "High_Throughput"
+
+    def run(self) -> List[Message]:
+        self.benchmark_utils.message_queue.consume()
+
+        for _ in range(1000):
+            produce_time = datetime.now()
+            messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
+            self.benchmark_utils.message_queue.produce(messages)
+            time.sleep(0.01)
+
+        time.sleep(30)
         
         self.benchmark_utils.message_queue.running = False
         consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
         print(f"High throughput benchmark complete. Consumed {len(consumed_messages)} messages.")
-        self.benchmark_utils.message_queue.close()
         self.benchmark_utils.message_queue.get_stats().draw_histogram("latency")
 
-        return consumed_messages
+        return consumed_messages    
+    
+
+class ConsumerDisconnectScenario(Scenario):
+    def __init__(self, benchmark_utils: BenchmarkUtils = None):
+        super().__init__(benchmark_utils)
+        self.scenario_name = "Consumer_Disconnect"
+
+    def run(self) -> List[Message]:
+        self.benchmark_utils.message_queue.consume()
+
+        for index in range(1000):
+            produce_time = datetime.now()
+            messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
+            self.benchmark_utils.message_queue.produce(messages)
+            time.sleep(0.01)
+
+            if index == 500:
+                consumer_index = random.randint(0, self.benchmark_utils.message_queue.consumer_count - 1)
+                self.benchmark_utils.message_queue.stop_consumer(consumer_index)
+
+        time.sleep(30)
+        
+        self.benchmark_utils.message_queue.running = False
+        consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
+        print(f"Consumer disconnect benchmark complete. Consumed {len(consumed_messages)} messages.")
+        self.benchmark_utils.message_queue.get_stats().draw_histogram("latency")
+
+        return consumed_messages 
+        
+            

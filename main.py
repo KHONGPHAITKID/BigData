@@ -8,17 +8,20 @@ from benchmark.stats import Stats
 from message_queue.kafka import KafkaMessageQueue, KafkaTopicManager
 
 broker = "localhost:9093"
+# broker = "kafka:9092"
 
 # Configuration for Kafka (adjust as needed)
 config = {
-    "topic": "5parTopic",
-    "partition": 5,
-    "replication_factor": 1,
-    "producer": {"bootstrap.servers": broker},
-    "consumer": {
-        "bootstrap.servers": broker,
-        "group.id": "test_group",
-        "auto.offset.reset": "earliest"
+    "kafka": {
+        "topic": "test_topic_1",
+        "partition": 5,
+        "replication_factor": 1,
+        "producer": {"bootstrap.servers": broker},
+        "consumer": {
+            "bootstrap.servers": broker,
+            "group.id": "test_group",
+            "auto.offset.reset": "earliest"
+        }
     }
 }
 
@@ -28,12 +31,11 @@ if __name__ == "__main__":
     queue = KafkaMessageQueue()  # Pass config if required
     queue.set_stats(stats)
 
-    topicManager = KafkaTopicManager(config["producer"]["bootstrap.servers"])
-    topicManager.create_topic(topic_name=config["topic"], num_partitions=config["partition"], replication_factor=config["replication_factor"])
+    topicManager = KafkaTopicManager(config["kafka"]["producer"]["bootstrap.servers"])
+    topicManager.create_topic(topic_name=config["kafka"]["topic"], num_partitions=config["kafka"]["partition"], replication_factor=config["kafka"]["replication_factor"])
     
     bench = Benchmark()
-    queue.connect(config)
     bench.set_message_queue(queue)
     
     print("Connected to Kafka")
-    bench.run()
+    bench.run(config)
