@@ -4,14 +4,19 @@
 # python main.py
 
 from benchmark.benchmark import Benchmark
+from benchmark.stats import Stats
 from message_queue.kafka import KafkaMessageQueue, KafkaTopicManager
+
+broker = "localhost:9093"
 
 # Configuration for Kafka (adjust as needed)
 config = {
-    "topic": "bigdfamily",
-    "producer": {"bootstrap.servers": "kafka:9092"},
+    "topic": "5parTopic",
+    "partition": 5,
+    "replication_factor": 1,
+    "producer": {"bootstrap.servers": broker},
     "consumer": {
-        "bootstrap.servers": "kafka:9092",
+        "bootstrap.servers": broker,
         "group.id": "test_group",
         "auto.offset.reset": "earliest"
     }
@@ -19,15 +24,16 @@ config = {
 
 if __name__ == "__main__":
     # Instantiate the benchmark and set the message queue
-    bench = Benchmark()
+    stats = Stats()
     queue = KafkaMessageQueue()  # Pass config if required
-    topicManager = KafkaTopicManager()
-    topicManager.create_topic(topic_name='bigdfamily', num_partitions=5, replication_factor=1)
+    queue.set_stats(stats)
+
+    topicManager = KafkaTopicManager(config["producer"]["bootstrap.servers"])
+    topicManager.create_topic(topic_name=config["topic"], num_partitions=config["partition"], replication_factor=config["replication_factor"])
+    
+    bench = Benchmark()
     queue.connect(config)
     bench.set_message_queue(queue)
+    
     print("Connected to Kafka")
-    # Run the benchmark
     bench.run()
-    stats = queue.get_stats()
-    stats.print_log("latency", "latency.log")  # Save latency stats to a file
-    stats.draw_histogram("latency", "latency_histogram.png")  # Create a histogram plot

@@ -22,8 +22,9 @@ class KafkaMessageQueue(MessageQueueBase):
         self.consumer_count = 5
         self.messages = []  # Buffer for consumed messages
         self.consumer_threads = []
-        self.running = False
+        self.consuming = False
         self.lock = Lock()
+        self.consume_timeout = 10  # Default timeout in seconds
 
     def connect(self, config: Dict[str, Any]) -> bool:
         """
@@ -47,6 +48,7 @@ class KafkaMessageQueue(MessageQueueBase):
                 raise ValueError("Consumer configuration must include 'group.id'")
             
             self.producer = Producer(producer_config)
+            self.consumer_count = config['partition']
             self.consumers = [Consumer(consumer_config) for _ in range(self.consumer_count)]
             for i in range(self.consumer_count):
                 self.consumers[i].subscribe([self.topic])
@@ -64,9 +66,9 @@ class KafkaMessageQueue(MessageQueueBase):
         logging.info(f"Starting consumer loop for {threading.current_thread().name}")  # Fixed
         print(f"Starting consumer loop for {threading.current_thread().name}")  # Fixed
         
-        while self.running:
+        while self.consuming:
             try:
-                msg = consumer.poll(timeout=1.0)
+                msg = consumer.poll(timeout=2.0)
                 if msg is None:
                     continue
                 if msg.error():
@@ -139,12 +141,10 @@ class KafkaMessageQueue(MessageQueueBase):
             logging.error(f"Failed to produce messages: {e}")
             return False
 
-    def consume(self) -> List[Message]:
+    def consume(self):
         """
-        Consume messages from the Kafka topic.
-
-        Returns:
-            List[Message]: List of consumed Message objects.
+        Start consuming messages from the Kafka topic in background threads.
+        This is non-blocking.
         """
         if not self.connected:
             raise RuntimeError("Not connected to Kafka")
@@ -152,7 +152,7 @@ class KafkaMessageQueue(MessageQueueBase):
         logging.info("Starting consumption")
         print("Starting consumption")
         
-        self.running = True
+        self.consuming = True
         self.consumer_threads = []
         for idx, consumer in enumerate(self.consumers):
             logging.info(f"Creating thread for consumer {idx}")
@@ -160,19 +160,25 @@ class KafkaMessageQueue(MessageQueueBase):
             t = threading.Thread(
                 target=self._consumer_loop,
                 args=(consumer,),
-                daemon=False,
+                daemon=True,  # Make threads daemon so they don't block program exit
                 name=f"Consumer-{idx}"
             )
             t.start()
             self.consumer_threads.append(t)
+    
+    def get_consumed_messages(self) -> List[Message]:
+        """
+        Get all messages that have been consumed so far.
+        This doesn't stop the consumption threads.
         
-        # Wait longer to allow message consumption
-        time.sleep(5)  # Increased from 1 to 5 seconds
+        Returns:
+            List[Message]: List of consumed Message objects.
+        """
         with self.lock:
             messages = self.messages.copy()
             self.messages.clear()
-        logging.info(f"Consumed {len(messages)} messages")
-        print(f"Consumed {len(messages)} messages")
+        logging.info(f"Retrieved {len(messages)} consumed messages")
+        print(f"Retrieved {len(messages)} consumed messages")
         return messages
     
     def close(self) -> bool:
@@ -184,7 +190,7 @@ class KafkaMessageQueue(MessageQueueBase):
         """
         logging.info("Closing Kafka connections")
         print("Closing Kafka connections")
-        self.running = False
+        self.consuming = False
         try:
             for thread in self.consumer_threads:
                 thread.join(timeout=2.0)
@@ -215,7 +221,7 @@ class KafkaTopicManager:
     """
     Manages Kafka topics including creation and partition checks.
     """
-    def __init__(self, bootstrap_servers='kafka:9092'):
+    def __init__(self, bootstrap_servers='localhost:9093'):
         self.admin_client = AdminClient({'bootstrap.servers': bootstrap_servers})
 
     def create_topic(self, topic_name: str, num_partitions=5, replication_factor=1) -> bool:

@@ -1,26 +1,39 @@
-from message_queue.interface import MessageQueueBase, Message
+from message_queue.interface import MessageQueueBase
 from typing import List
-import uuid
-from datetime import datetime
-from benchmark.stats import Stats
+from benchmark.scenario import Scenario, LowThroughputScenario, HighThroughputScenario
+from benchmark.utils import BenchmarkUtils
 
 class Benchmark:
     def __init__(self):
-        self.message_queue = None
+        self.utils = BenchmarkUtils()
+        self.scenario = None
 
     def set_message_queue(self, message_queue: MessageQueueBase):
-        self.message_queue = message_queue
+        self.utils.set_message_queue(message_queue)
 
-    def create_payload(self, size: int, produce_time: datetime) -> List[Message]:
-        return [Message(id=str(uuid.uuid4()), content=str(uuid.uuid4()), produce_time=produce_time, consume_time=None) for _ in range(size)]
+    def set_scenario(self, scenario: Scenario):
+        self.scenario = scenario
 
     def run(self):
-        # self.message_queue.connect()
-        self.message_queue.set_stats(Stats())
+        self.scenario = HighThroughputScenario(self.utils)
+        messages = self.scenario.run()
 
-        self.message_queue.consume()  # Stats recorded here
-        for _ in range(50):  # Number of iterations
-            produce_time = datetime.now()
-            messages = self.create_payload(size=10, produce_time=produce_time)
-            self.message_queue.produce(messages)
-        self.message_queue.close()
+        latency_list = []
+        if messages:
+            for message in messages:
+                if message.produce_time and message.consume_time:
+                    latency_list.append((message.consume_time - message.produce_time).total_seconds())
+            if latency_list:
+                avg_latency = sum(latency_list) / len(latency_list)
+                print(f"Average latency: {avg_latency:.6f} seconds")
+
+            # print the latency list
+            with open("latency_list.txt", "w") as f:
+                for latency in latency_list:
+                    f.write(f"{latency}\n")
+
+            
+        else:
+            print("No messages to calculate latency")
+
+        
