@@ -22,25 +22,25 @@ class RabbitMQ(MessageQueueBase):
         self.config = config
         self.queue = config['queue']
         self.num_queues = config['num_queues']
-        
+
         # Connection and channel tracking
         self.publisher_connection = None
         self.publisher = None
         self.channels = []
         self.channel_connections = []
-        
+
         # Message tracking
         self.messages = [[] for _ in range(self.num_queues + 1)]
         self.message_count = defaultdict(int)
         self.last_message_time = defaultdict(float)
-        
+
         # Thread management
         self.consumer_threads = []
         self.stop_event = threading.Event()
-        
+
         # Connection status
         self.connected = False
-        
+
         # Queue setup options
         self.purge_queues = config.get('purge_queues', False)
         self.delete_queues = config.get('delete_queues', False)
@@ -69,7 +69,7 @@ class RabbitMQ(MessageQueueBase):
             self.publisher_connection = pika.BlockingConnection(
                 self._get_connection_params()
             )
-            self.publisher = self.publisher_connection.channel()
+            self.publisher = self.publisher_connection.channel(channel_number=1000)
             return True
         except Exception:
             return False
@@ -80,23 +80,23 @@ class RabbitMQ(MessageQueueBase):
         try:
             self.channels = []
             self.channel_connections = []
-            
+
             for i in range(self.num_queues):
                 try:
                     conn = pika.BlockingConnection(self._get_connection_params())
-                    channel = conn.channel()
+                    channel = conn.channel(channel_number=i+1)
                     self.channel_connections.append(conn)
                     self.channels.append(channel)
                 except Exception:
                     success = False
-                    
+
             if self.channels:
                 return True
             else:
                 return False
         except Exception:
             return False
-            
+
     def _setup_queue(self, channel, queue_name):
         """Setup a queue with proper error handling for existing queues."""
         try:
@@ -108,7 +108,7 @@ class RabbitMQ(MessageQueueBase):
                 except Exception as e:
                     # Queue might not exist, which is fine
                     print(f"Could not delete queue {queue_name}: {e}")
-                
+
             # Declare the queue with specified properties
             print(f"Declaring queue {queue_name} with durable={self.durable}")
             channel.queue_declare(
@@ -116,7 +116,7 @@ class RabbitMQ(MessageQueueBase):
                 durable=self.durable,
                 auto_delete=self.auto_delete
             )
-            
+
             # Purge queue if configured
             if self.purge_queues:
                 try:
@@ -124,7 +124,7 @@ class RabbitMQ(MessageQueueBase):
                     channel.queue_purge(queue=queue_name)
                 except Exception as e:
                     print(f"Could not purge queue {queue_name}: {e}")
-                    
+
             return True
         except pika.exceptions.ChannelClosedByBroker as e:
             # Handle PRECONDITION_FAILED errors
@@ -140,7 +140,7 @@ class RabbitMQ(MessageQueueBase):
                         new_channel = conn.channel()
                         self.channel_connections[i] = conn
                         self.channels[i] = new_channel
-                        
+
                         # Force delete and recreate
                         new_channel.queue_delete(queue=queue_name)
                         new_channel.queue_declare(
@@ -163,32 +163,32 @@ class RabbitMQ(MessageQueueBase):
         print("Initializing publisher")
         if not self._initialize_publisher():
             return False
-            
+
         # Initialize channels
         print("Initializing channels")
         if not self._initialize_channels():
             return False
-            
+
         # Set up queues
         print("Setting up queues")
         try:
             for i, channel in enumerate(self.channels):
                 queue_name = f'{self.queue}-{i+1}'
-                
+
                 # Setup queue with proper error handling
                 if not self._setup_queue(channel, queue_name):
                     print(f"Failed to set up queue {queue_name}")
                     continue
-                
+
                 # Set up consumer
                 channel.basic_consume(
                     queue=queue_name,
                     on_message_callback=self.callback,
                     auto_ack=True
                 )
-                
+
                 self.last_message_time[i+1] = time.time()
-            
+
             if all(channel.is_open for channel in self.channels):
                 self.connected = True
                 print("Successfully connected to RabbitMQ")
@@ -206,22 +206,22 @@ class RabbitMQ(MessageQueueBase):
         """Produce messages to RabbitMQ queues."""
         if not self.is_connected():
             return False
-            
+
         try:
             for idx, message in enumerate(messages):
                 message.produce_time = datetime.now()
                 message_dict = message.to_dict()
                 self._serialize_datetime_fields(message_dict)
-                
+
                 message_json = json.dumps(message_dict)
                 queue_idx = idx % self.num_queues + 1
                 routing_key = f'{self.queue}-{queue_idx}'
-                
+
                 properties = pika.BasicProperties(
                     delivery_mode=2,  # Make message persistent
                     content_type='application/json'
                 )
-                
+
                 self.publisher.basic_publish(
                     exchange='',
                     routing_key=routing_key,
@@ -248,13 +248,13 @@ class RabbitMQ(MessageQueueBase):
         if not self.is_connected():
             print("Not connected")
             return []
-            
+
         try:
             print("Consuming messages")
             # Clear previous state
             self.consumer_threads = []
             self.stop_event.clear()
-            
+
             # Start consumer threads
             for i, channel in enumerate(self.channels):
                 channel_idx = i + 1
@@ -286,7 +286,7 @@ class RabbitMQ(MessageQueueBase):
         )
         monitor_thread.daemon = True
         monitor_thread.start()
-        
+
         try:
             channel.start_consuming()
         except Exception:
@@ -300,8 +300,8 @@ class RabbitMQ(MessageQueueBase):
     def _monitor_activity(self, channel: pika.channel.Channel, channel_idx: int) -> None:
         """Monitor channel activity and stop consuming if idle."""
         try:
-            timeout_seconds = self.config.get('idle_timeout', 4)
-            
+            timeout_seconds = self.config.get('idle_timeout', 10)
+
             while not self.stop_event.is_set():
                 current_time = time.time()
                 if (current_time - self.last_message_time[channel_idx]) > timeout_seconds:
@@ -322,7 +322,7 @@ class RabbitMQ(MessageQueueBase):
             channel_idx = ch.channel_number
             self.message_count[channel_idx] += 1
             self.last_message_time[channel_idx] = time.time()
-            
+
             # Add current timestamp to the message as consume_time
             try:
                 # Parse the message and update the consume_time
@@ -330,17 +330,17 @@ class RabbitMQ(MessageQueueBase):
                     message_str = body.decode('utf-8')
                 else:
                     message_str = body
-                
+
                 message_dict = json.loads(message_str)
                 message_dict['consume_time'] = datetime.now().isoformat()
-                
+
                 # Reserialize the message with the updated consume_time
                 updated_body = json.dumps(message_dict).encode('utf-8')
                 self.messages[channel_idx].append(updated_body)
             except Exception:
                 # If we can't update the consume_time, store the original message
                 self.messages[channel_idx].append(body)
-                
+
             return body
         except Exception:
             return body
@@ -356,10 +356,10 @@ class RabbitMQ(MessageQueueBase):
                         message_str = message.decode('utf-8')
                     else:
                         message_str = message
-                    
+
                     # Parse JSON and create Message object
                     message_dict = json.loads(message_str)
-                    
+
                     # Convert ISO format string to datetime if needed
                     # Convert consume_time from ISO format string to datetime if needed
                     if isinstance(message_dict.get('consume_time'), str):
@@ -369,7 +369,7 @@ class RabbitMQ(MessageQueueBase):
                             # If parsing fails, use current time
                             print("Failed to parse consume_time")
                             message_dict['consume_time'] = datetime.now()
-                    
+
                     # Convert produce_time from ISO format string to datetime if needed
                     if isinstance(message_dict.get('produce_time'), str):
                         try:
@@ -378,11 +378,11 @@ class RabbitMQ(MessageQueueBase):
                             # If parsing fails, use current time
                             print("Failed to parse produce_time")
                             message_dict['produce_time'] = None
-                    
+
                     result.append(Message.from_dict(message_dict))
                 except (TypeError, json.JSONDecodeError):
                     pass
-        
+
         # Clear messages after processing
         self.messages = [[] for _ in range(self.num_queues + 1)]
         return result
@@ -391,12 +391,12 @@ class RabbitMQ(MessageQueueBase):
         """Close all connections to RabbitMQ."""
         self.stop_event.set()
         success = True
-        
+
         try:
             # Stop all consumer threads gracefully
             for idx, t in enumerate(self.consumer_threads):
                 t.join(timeout=2)
-            
+
             # Close channel connections
             for i, channel in enumerate(self.channels):
                 try:
@@ -404,7 +404,7 @@ class RabbitMQ(MessageQueueBase):
                         channel.close()
                 except Exception:
                     success = False
-            
+
             # Close the channel connections
             for i, conn in enumerate(self.channel_connections):
                 try:
@@ -412,20 +412,20 @@ class RabbitMQ(MessageQueueBase):
                         conn.close()
                 except Exception:
                     success = False
-                    
+
             # Close the publisher connection
             if self.publisher and self.publisher.is_open:
                 try:
                     self.publisher.close()
                 except Exception:
                     success = False
-                
+
             if self.publisher_connection and self.publisher_connection.is_open:
                 try:
                     self.publisher_connection.close()
                 except Exception:
                     success = False
-                
+
             self.connected = False
             return success
         except Exception:
@@ -436,12 +436,12 @@ class RabbitMQ(MessageQueueBase):
         """Check if the connection to RabbitMQ is open."""
         try:
             # Check publisher connection
-            publisher_connected = (self.publisher and self.publisher.is_open and 
+            publisher_connected = (self.publisher and self.publisher.is_open and
                                   self.publisher_connection and self.publisher_connection.is_open)
-            
+
             # Check if we have at least one working channel
             channels_connected = any(channel.is_open for channel in self.channels if channel)
-            
+
             return publisher_connected and channels_connected and self.connected
         except Exception:
             return False
