@@ -1,13 +1,15 @@
 from confluent_kafka import Producer, Consumer, KafkaException, KafkaError
 import json
 from datetime import datetime
-import time
 from typing import List, Dict, Any
 from message_queue.interface import MessageQueueBase, Message
 from confluent_kafka.admin import AdminClient, NewTopic
 import logging
 import threading  # Changed from 'from threading import Thread' to import the whole module
 from threading import Lock    
+import time
+
+KAFKA = "kafka"
 
 # Create a ConsumerWrapper class to store consumer and its status
 class ConsumerWrapper:
@@ -16,23 +18,31 @@ class ConsumerWrapper:
         self.active = active
         self.connected = connected
         self.consumed_messages = []
+        self.reached_latest_offset = False
+        self.no_message_count = 0
+        self.max_empty_polls = 3  # Number of consecutive empty polls to consider as reached end
+        self.idle_timeout = 10  # Default idle timeout in seconds
+        self.last_message_time = None
+
 
 
 class KafkaMessageQueue(MessageQueueBase):
     """
     Kafka implementation of the MessageQueueBase interface using Confluent Kafka.
     """
-    def __init__(self):
+    def __init__(self, config: Dict[str, Any]):
         """Initialize the Kafka message queue with no connections."""
-        super().__init__()
+        super().__init__(KAFKA)
         self.producer = None
         self.consumers = []
         self.topic = None
         self.consumer_threads = []
         self.consuming = False
         self.consume_timeout = 10  # Default timeout in seconds
-
-    def connect(self, config: Dict[str, Any]) -> bool:
+        self.topic_manager = KafkaTopicManager(config["producer"]["bootstrap.servers"])
+        self.config = config
+        self.stop_at_latest = True
+    def connect(self) -> bool:
         """
         Connect to the Kafka cluster using the provided configuration.
 
@@ -46,15 +56,18 @@ class KafkaMessageQueue(MessageQueueBase):
             bool: True if connection is established, False otherwise.
         """
         try:
-            self.topic = config['topic']
-            producer_config = config['producer']
-            consumer_config = config['consumer']
+            if not self.topic_manager.active:
+                self.topic_manager.create_topic(self.config['topic'], self.config['partition'], self.config['replication_factor'])
+                self.topic_manager.active = True
+            self.topic = self.config['topic']
+            producer_config = self.config['producer']
+            consumer_config = self.config['consumer']
             
             if 'group.id' not in consumer_config:
                 raise ValueError("Consumer configuration must include 'group.id'")
             
             self.producer = Producer(producer_config)
-            self.consumer_count = config['partition']
+            self.consumer_count = self.config['partition']
             
             
             # Initialize consumers list with ConsumerWrapper instances
@@ -75,31 +88,60 @@ class KafkaMessageQueue(MessageQueueBase):
         """Individual consumer processing loop"""
         logging.info(f"Starting consumer loop for {threading.current_thread().name}")  # Fixed
         print(f"Starting consumer loop for {threading.current_thread().name}")  # Fixed
+        consumer.last_message_time = None
         
         while self.consuming:
             if not consumer.active:
                 if consumer.connected:
                     consumer.client.close()
                     consumer.connected = False
+                    self.running_consumers -= 1
                     print(f"Consumer {threading.current_thread().name} quit")
                 continue
 
             if not consumer.connected:
                 consumer.client.subscribe([self.topic])
                 consumer.connected = True
+                self.running_consumers += 1
                 print(f"Consumer {threading.current_thread().name} rejoined")
+                
+            # Check if already reached latest offset
+            if consumer.reached_latest_offset:
+                # print(f"Consumer {threading.current_thread().name} reached latest offset, idle timeout: {datetime.now() - consumer.last_message_time}")
+                # Only stop if stop_at_latest is True
+                if self.stop_at_latest and (datetime.now() - consumer.last_message_time).total_seconds() > consumer.idle_timeout:
+                    consumer.active = False
+                    break
+                continue
+                
             try:
                 msg = consumer.client.poll(timeout=2.0)
                 if msg is None:
+                    # Count consecutive empty polls to determine if we reached latest offset
+                    consumer.no_message_count += 1
+                    if consumer.no_message_count >= consumer.max_empty_polls:
+                        # logging.info(f"Consumer {threading.current_thread().name} reached latest offset (no new messages)")
+                        # print(f"Consumer {threading.current_thread().name} reached latest offset (no new messages)")
+                        consumer.reached_latest_offset = (consumer.last_message_time is not None)
                     continue
+                else:
+                    # Reset counter when we get messages
+                    consumer.no_message_count = 0
+                    
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
+                        # This means we've reached the end of this partition
+                        logging.info(f"Consumer {threading.current_thread().name} reached end of partition")
+                        print(f"Consumer {threading.current_thread().name} reached end of partition")
+                        consumer.reached_latest_offset = (consumer.last_message_time is not None)
                         continue
                     logging.error(f"Consumer error: {msg.error()}")
                     if msg.error().fatal():
                         break
                     continue
                 
+                consumer.reached_latest_offset = False
+                consumer.last_message_time = datetime.now()
                 json_str = msg.value().decode('utf-8')
                 data = json.loads(json_str)
                 
@@ -130,6 +172,7 @@ class KafkaMessageQueue(MessageQueueBase):
                 time.sleep(1)
         logging.info(f"Consumer loop for {threading.current_thread().name} terminated")
         print(f"Consumer loop for {threading.current_thread().name} terminated")
+        self.running_consumers -= 1
 
     def produce(self, messages: List[Message]) -> bool:
         """
@@ -160,19 +203,30 @@ class KafkaMessageQueue(MessageQueueBase):
             logging.error(f"Failed to produce messages: {e}")
             return False
 
-    def consume(self):
+    def consume(self, stop_at_latest=True):
         """
         Start consuming messages from the Kafka topic in background threads.
         This is non-blocking.
+        
+        Args:
+            stop_at_latest: If True, consumers will stop once they reach the latest offset
         """
         if not self.connected:
             raise RuntimeError("Not connected to Kafka")
             
-        logging.info("Starting consumption")
-        print("Starting consumption")
+        logging.info(f"Starting consumption with stop_at_latest={stop_at_latest}")
+        print(f"Starting consumption with stop_at_latest={stop_at_latest}")
         
         self.consuming = True
+        self.stop_at_latest = stop_at_latest
+        self.running_consumers = len(self.consumers)
         self.consumer_threads = []
+        
+        # Reset consumer status before starting threads
+        for consumer in self.consumers:
+            consumer.reached_latest_offset = False
+            consumer.no_message_count = 0
+        
         for idx, consumer in enumerate(self.consumers):
             logging.info(f"Creating thread for consumer {idx}")
             print(f"Creating thread for consumer {idx}")
@@ -193,16 +247,19 @@ class KafkaMessageQueue(MessageQueueBase):
             return
         self.consumers[index].active = False
     
-    def get_consumed_messages(self) -> List[Message]:
+    def get_consumed_messages(self, auto_stop_at_latest=False) -> List[Message]:
         """
         Get all messages that have been consumed so far.
-        This doesn't stop the consumption threads.
+        This doesn't stop the consumption threads by default.
         
+        Args:
+            auto_stop_at_latest: If True, consumers that have reached latest offset will be stopped
+            
         Returns:
             List[Message]: List of consumed Message objects.
         """
         messages = []
-        for consumer in self.consumers:
+        for i, consumer in enumerate(self.consumers):
             messages.extend(consumer.consumed_messages.copy())
             consumer.consumed_messages = []
 
@@ -252,6 +309,7 @@ class KafkaTopicManager:
     """
     def __init__(self, bootstrap_servers='localhost:9093'):
         self.admin_client = AdminClient({'bootstrap.servers': bootstrap_servers})
+        self.active = False
 
     def create_topic(self, topic_name: str, num_partitions=5, replication_factor=1) -> bool:
         """

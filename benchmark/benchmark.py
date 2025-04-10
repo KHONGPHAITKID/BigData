@@ -14,17 +14,17 @@ class Benchmark:
     def set_scenario(self, scenario: Scenario):
         self.scenario = scenario
 
-    def run(self, config: Dict[str, Any]):
+    def run(self):
         list_of_scenarios = [
             LowThroughputScenario(self.utils),
-            MediumThroughputScenario(self.utils),
-            HighThroughputScenario(self.utils),
-            ConsumerDisconnectScenario(self.utils),
+            # MediumThroughputScenario(self.utils),
+            # HighThroughputScenario(self.utils),
+            # ConsumerDisconnectScenario(self.utils),
         ]
         message_queue = self.utils.message_queue
         
         for scenario in list_of_scenarios:
-            message_queue.connect(config["kafka"])
+            message_queue.connect()
             print(f"Running {scenario.scenario_name}")
             self.scenario = scenario
             messages = self.scenario.run()
@@ -39,7 +39,7 @@ class Benchmark:
                     print(f"Average latency: {avg_latency:.6f} seconds")
 
                 # print the latency list
-                with open(f"benchmark/logs/{self.scenario.scenario_name}_latency_list.txt", "w") as f:
+                with open(f"benchmark/logs/{message_queue.name}_{self.scenario.scenario_name}_latency_list.txt", "w") as f:
                     for latency in latency_list:
                         f.write(f"{latency}\n")
                     

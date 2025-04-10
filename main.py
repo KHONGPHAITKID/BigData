@@ -4,46 +4,47 @@
 # python main.py
 
 from benchmark.benchmark import Benchmark
-from benchmark.stats import Stats
-from message_queue.kafka import KafkaMessageQueue, KafkaTopicManager
+from message_queue.factory import MessageQueueFactory
+from message_queue.rabbitmq import RABBIT
+from message_queue.kafka import KAFKA
 import os
 
 # Get broker address from environment variable, with fallback logic
 # Use KAFKA_BROKER env var if set, otherwise determine based on environment
-broker = os.environ.get('KAFKA_BROKER')
-if not broker:
+kakfa_broker = os.environ.get('KAFKA_BROKER')
+if not kakfa_broker:
     # Logic to detect if running inside Docker
     is_docker = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER') == 'true'
-    broker = "kafka:9092" if is_docker else "localhost:9093"
-
-print(f"Using Kafka broker: {broker}")
+    kafka_broker = "kafka:9092" if is_docker else "localhost:9093"
 
 # Configuration for Kafka (adjust as needed)
 config = {
     "kafka": {
-        "topic": "test_topic_1",
+        "topic": "test_topic_3",
         "partition": 5,
         "replication_factor": 1,
-        "producer": {"bootstrap.servers": broker},
+        "producer": {"bootstrap.servers": kafka_broker},
         "consumer": {
-            "bootstrap.servers": broker,
+            "bootstrap.servers": kafka_broker,
             "group.id": "test_group",
             "auto.offset.reset": "earliest"
         }
+    },
+    "rabbitmq": {
+        'host': 'localhost',
+        'port': 5672,
+        'username': 'guest',
+        'password': 'guest',
+        'queue': 'test_queue',
+        'num_queues': 1,
     }
 }
 
 if __name__ == "__main__":
-    # Instantiate the benchmark and set the message queue
-    stats = Stats()
-    queue = KafkaMessageQueue()  # Pass config if required
-    queue.set_stats(stats)
-
-    topicManager = KafkaTopicManager(config["kafka"]["producer"]["bootstrap.servers"])
-    topicManager.create_topic(topic_name=config["kafka"]["topic"], num_partitions=config["kafka"]["partition"], replication_factor=config["kafka"]["replication_factor"])
     
+    message_queue_factory = MessageQueueFactory(config)
+    message_queue = message_queue_factory.create_message_queue(RABBIT)
+       
     bench = Benchmark()
-    bench.set_message_queue(queue)
-    
-    print("Connected to Kafka")
-    bench.run(config)
+    bench.set_message_queue(message_queue)    
+    bench.run()

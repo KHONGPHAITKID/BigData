@@ -37,13 +37,15 @@ class MessageQueueBase(ABC):
     """
     Base class for message queue implementations
     """
-    def __init__(self):
+    def __init__(self, name: str):
         self.connected = False
         self.stats = None
         self.consumer_count = -1
+        self.name = name
+        self.running_consumers = 0
     
     @abstractmethod
-    def connect(self, config: Dict[str, Any]) -> bool:
+    def connect(self) -> bool:
         """
         Connect to the message queue service.
         
@@ -69,7 +71,7 @@ class MessageQueueBase(ABC):
         pass
 
     @abstractmethod
-    def consume(self) -> List[Message]:
+    def consume(self):
         """
         Consume messages from the queue.
         
@@ -129,4 +131,10 @@ class MessageQueueBase(ABC):
         Get the consumed messages.
         """
         pass
+
+    def is_consuming(self) -> bool:
+        """
+        Check if the queue is consuming messages.
+        """
+        return self.running_consumers > 0
         
