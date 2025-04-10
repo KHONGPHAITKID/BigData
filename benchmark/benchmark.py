@@ -3,6 +3,8 @@ from typing import List
 import uuid
 from datetime import datetime
 from benchmark.stats import Stats
+from threading import Thread
+
 
 class Benchmark:
     def __init__(self):
@@ -18,9 +20,14 @@ class Benchmark:
         # self.message_queue.connect()
         self.message_queue.set_stats(Stats())
 
-        self.message_queue.consume()  # Stats recorded here
-        for _ in range(50):  # Number of iterations
+        t = Thread(target=self.message_queue.consume)
+        t.start()
+        for _ in range(5):  # Number of iterations
             produce_time = datetime.now()
             messages = self.create_payload(size=10, produce_time=produce_time)
+            # print(f"Producing {len(messages)} messages at {produce_time}")
             self.message_queue.produce(messages)
+
+        print("Waiting for consumer to finish")
+        t.join()
         self.message_queue.close()
