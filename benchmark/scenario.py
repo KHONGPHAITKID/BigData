@@ -117,3 +117,17 @@ class ConsumerDisconnectScenario(Scenario):
         return consumed_messages 
         
             
+
+class ExtremeThroughputScenario(Scenario):
+    def __init__(self, benchmark_utils: BenchmarkUtils = None):
+        super().__init__(benchmark_utils)
+        self.scenario_name = "Extreme_Throughput"
+        
+        
+    def run(self) -> List[Message]:
+        self.benchmark_utils.message_queue.consume()
+
+        for _ in range(1000):
+            produce_time = datetime.now()
+            messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
+            self.benchmark_utils.message_queue.produce(messages)

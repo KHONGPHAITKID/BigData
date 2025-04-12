@@ -12,6 +12,7 @@ class Message:
     content: Any
     produce_time: datetime
     consume_time: datetime
+    data: bytes = b'\x00' * (10 * 1024 * 1024)  # Default value of 10MB
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary for serialization."""
@@ -130,6 +131,9 @@ class MessageQueueBase(ABC):
         """
         Get the consumed messages.
         """
+        pass
+
+    def get_num_consumed_messages(self) -> int:
         pass
 
     def is_consuming(self) -> bool:

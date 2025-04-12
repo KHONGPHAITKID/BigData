@@ -17,8 +17,8 @@ class Benchmark:
     def run(self):
         list_of_scenarios = [
             LowThroughputScenario(self.utils),
-            # MediumThroughputScenario(self.utils),
-            # HighThroughputScenario(self.utils),
+            MediumThroughputScenario(self.utils),
+            HighThroughputScenario(self.utils),
             # ConsumerDisconnectScenario(self.utils),
         ]
         message_queue = self.utils.message_queue
