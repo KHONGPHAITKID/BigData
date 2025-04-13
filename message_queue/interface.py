@@ -12,7 +12,7 @@ class Message:
     content: Any
     produce_time: datetime
     consume_time: datetime
-    data: bytes = b'\x00' * (10 * 1024 * 1024)  # Default value of 10MB
+    data: bytes = b'\x00' * (10 * 1024)  # Default value of 10KB
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary for serialization."""
@@ -20,7 +20,8 @@ class Message:
             "id": self.id,
             "content": self.content,
             "produce_time": self.produce_time,
-            "consume_time": self.consume_time
+            "consume_time": self.consume_time,
+            "data": self.data
         }
     
     @classmethod
@@ -30,7 +31,8 @@ class Message:
             id=data.get("id", ""),
             content=data.get("content"),
             produce_time=data.get("produce_time"),
-            consume_time=data.get("consume_time")
+            consume_time=data.get("consume_time"),
+            data=data.get("data", b'\x00' * (10 * 1024))
         )
 
 
@@ -44,6 +46,7 @@ class MessageQueueBase(ABC):
         self.consumer_count = -1
         self.name = name
         self.running_consumers = 0
+        self.sample_log_rate = 5
     
     @abstractmethod
     def connect(self) -> bool:
@@ -127,9 +130,15 @@ class MessageQueueBase(ABC):
         
         pass
 
-    def get_consumed_messages(self) -> List[Message]:
+    def get_total_consumed_messages(self) -> int:
         """
-        Get the consumed messages.
+        Get the total consumed messages.
+        """
+        pass
+        
+    def get_average_latency(self) -> float:
+        """
+        Get the average latency.
         """
         pass
 

@@ -8,6 +8,7 @@ import logging
 import threading  # Changed from 'from threading import Thread' to import the whole module
 from threading import Lock    
 import time
+import random
 
 KAFKA = "kafka"
 
@@ -17,7 +18,8 @@ class ConsumerWrapper:
         self.client = client
         self.active = active
         self.connected = connected
-        self.consumed_messages = []
+        self.total_consumed_messages = 0
+        self.latency = 0
         self.reached_latest_offset = False
         self.no_message_count = 0
         self.max_empty_polls = 3  # Number of consecutive empty polls to consider as reached end
@@ -104,6 +106,8 @@ class KafkaMessageQueue(MessageQueueBase):
                 consumer.connected = True
                 self.running_consumers += 1
                 print(f"Consumer {threading.current_thread().name} rejoined")
+
+            # print(f"Consumer {threading.current_thread().name} is connected: {consumer.connected}")
                 
             # Check if already reached latest offset
             if consumer.reached_latest_offset:
@@ -153,7 +157,11 @@ class KafkaMessageQueue(MessageQueueBase):
                     produce_time=produce_time,
                     consume_time=consume_time
                 )
-                consumer.consumed_messages.append(message)  # Store messages for return
+                consumer.total_consumed_messages += 1
+                consumer.latency += (consume_time - produce_time).total_seconds()
+                randNumber = random.randint(0, 100)
+                if randNumber <= self.sample_log_rate:
+                    print(f"Total consumed messages: {consumer.total_consumed_messages}")
                 
                 if produce_time and consume_time and self.stats:
                     latency = (consume_time - produce_time).total_seconds()
@@ -196,14 +204,15 @@ class KafkaMessageQueue(MessageQueueBase):
                     "consume_time": msg.consume_time.isoformat() if msg.consume_time else None
                 }
                 json_msg = json.dumps(msg_dict)
-                self.producer.produce(self.topic, value=json_msg.encode('utf-8'))
+                # Using message ID as the partition key to ensure related messages go to the same partition
+                self.producer.produce(self.topic, key=msg.id.encode('utf-8'), value=json_msg.encode('utf-8'))
             self.producer.flush()
             return True
         except Exception as e:
             logging.error(f"Failed to produce messages: {e}")
             return False
 
-    def consume(self, stop_at_latest=True):
+    def consume(self):
         """
         Start consuming messages from the Kafka topic in background threads.
         This is non-blocking.
@@ -214,11 +223,11 @@ class KafkaMessageQueue(MessageQueueBase):
         if not self.connected:
             raise RuntimeError("Not connected to Kafka")
             
-        logging.info(f"Starting consumption with stop_at_latest={stop_at_latest}")
-        print(f"Starting consumption with stop_at_latest={stop_at_latest}")
+        logging.info(f"Starting consumption")
+        print(f"Starting consumption")
         
         self.consuming = True
-        self.stop_at_latest = stop_at_latest
+        self.stop_at_latest = True
         self.running_consumers = len(self.consumers)
         self.consumer_threads = []
         
@@ -239,6 +248,18 @@ class KafkaMessageQueue(MessageQueueBase):
             t.start()
             self.consumer_threads.append(t)
 
+    def get_total_consumed_messages(self) -> int:
+        """
+        Get the total consumed messages.
+        """
+        return sum(consumer.total_consumed_messages for consumer in self.consumers)
+
+    def get_average_latency(self) -> float:
+        """
+        Get the average latency.
+        """
+        return sum(consumer.latency for consumer in self.consumers) / self.get_total_consumed_messages()
+
     def stop_consumer(self, index: int) -> None:
         """
         Stop a consumer.
@@ -246,26 +267,6 @@ class KafkaMessageQueue(MessageQueueBase):
         if index >= len(self.consumers):
             return
         self.consumers[index].active = False
-    
-    def get_consumed_messages(self, auto_stop_at_latest=False) -> List[Message]:
-        """
-        Get all messages that have been consumed so far.
-        This doesn't stop the consumption threads by default.
-        
-        Args:
-            auto_stop_at_latest: If True, consumers that have reached latest offset will be stopped
-            
-        Returns:
-            List[Message]: List of consumed Message objects.
-        """
-        messages = []
-        for i, consumer in enumerate(self.consumers):
-            messages.extend(consumer.consumed_messages.copy())
-            consumer.consumed_messages = []
-
-        logging.info(f"Retrieved {len(messages)} consumed messages")
-        print(f"Retrieved {len(messages)} consumed messages")
-        return messages
     
     def close(self) -> bool:
         """

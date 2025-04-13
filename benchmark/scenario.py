@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from benchmark.utils import BenchmarkUtils
 from message_queue.interface import Message
-from typing import List
+from typing import List, Tuple
 import time
 import random
 
@@ -13,7 +13,7 @@ class Scenario(ABC):
         self.scenario_name = None
 
     @abstractmethod
-    def run(self) -> List[Message]:
+    def run(self) -> Tuple[int, float, float]:
         pass
 
     def set_benchmark_utils(self, benchmark_utils: BenchmarkUtils):
@@ -25,9 +25,10 @@ class LowThroughputScenario(Scenario):
         super().__init__(benchmark_utils)
         self.scenario_name = "Low_Throughput"
 
-    def run(self) -> List[Message]:
+    def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
+        start_time = datetime.now()
         for _ in range(50):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=10, produce_time=produce_time)
@@ -35,11 +36,14 @@ class LowThroughputScenario(Scenario):
 
         while self.benchmark_utils.message_queue.is_consuming():
             time.sleep(0.1)
+        end_time = datetime.now()
+        time_taken = (end_time - start_time).total_seconds()
+        print(f"Time taken: {time_taken}")
         
-        consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
-        print(f"Low throughput benchmark complete. Consumed {len(consumed_messages)} messages.")
+        total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
+        average_latency = self.benchmark_utils.message_queue.get_average_latency()
 
-        return consumed_messages
+        return total_consumed_messages, average_latency, time_taken
     
 class MediumThroughputScenario(Scenario):
 
@@ -47,9 +51,10 @@ class MediumThroughputScenario(Scenario):
         super().__init__(benchmark_utils)
         self.scenario_name = "Medium_Throughput"
 
-    def run(self) -> List[Message]:
+    def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
+        start_time = datetime.now()
         # Higher message count and larger batch size for high throughput
         for _ in range(200):  # Increased from 50 to 200 iterations
             produce_time = datetime.now()
@@ -59,20 +64,25 @@ class MediumThroughputScenario(Scenario):
 
         while self.benchmark_utils.message_queue.is_consuming():    
             time.sleep(0.1)
-        
-        consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
-        print(f"Medium throughput benchmark complete. Consumed {len(consumed_messages)} messages.")
+        end_time = datetime.now()
+        time_taken = (end_time - start_time).total_seconds()
+        print(f"Time taken: {time_taken}")
+        # consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
+        # print(f"Medium throughput benchmark complete. Consumed {len(consumed_messages)} messages.")
+        total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
+        average_latency = self.benchmark_utils.message_queue.get_average_latency()
 
-        return consumed_messages
+        return total_consumed_messages, average_latency, time_taken
     
 class HighThroughputScenario(Scenario):
     def __init__(self, benchmark_utils: BenchmarkUtils = None):
         super().__init__(benchmark_utils)
         self.scenario_name = "High_Throughput"
 
-    def run(self) -> List[Message]:
+    def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
+        start_time = datetime.now()
         for _ in range(1000):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
@@ -81,11 +91,13 @@ class HighThroughputScenario(Scenario):
 
         while self.benchmark_utils.message_queue.is_consuming():
             time.sleep(0.1)
-        
-        consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
-        self.benchmark_utils.message_queue.get_stats().draw_histogram("latency")
+        end_time = datetime.now()
+        time_taken = (end_time - start_time).total_seconds()
+        print(f"Time taken: {time_taken}")
+        total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
+        average_latency = self.benchmark_utils.message_queue.get_average_latency()
 
-        return consumed_messages    
+        return total_consumed_messages, average_latency, time_taken
     
 
 class ConsumerDisconnectScenario(Scenario):
@@ -93,9 +105,10 @@ class ConsumerDisconnectScenario(Scenario):
         super().__init__(benchmark_utils)
         self.scenario_name = "Consumer_Disconnect"
 
-    def run(self) -> List[Message]:
+    def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
+        start_time = datetime.now()
         for index in range(1000):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
@@ -108,13 +121,16 @@ class ConsumerDisconnectScenario(Scenario):
 
         while self.benchmark_utils.message_queue.is_consuming():
             time.sleep(0.1)
+        end_time = datetime.now()
+        time_taken = (end_time - start_time).total_seconds()
+        print(f"Time taken: {time_taken}")
         
         self.benchmark_utils.message_queue.running = False
-        consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
-        print(f"Consumer disconnect benchmark complete. Consumed {len(consumed_messages)} messages.")
-        self.benchmark_utils.message_queue.get_stats().draw_histogram("latency")
+      
+        total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
+        average_latency = self.benchmark_utils.message_queue.get_average_latency()
 
-        return consumed_messages 
+        return total_consumed_messages, average_latency, time_taken
         
             
 
@@ -124,10 +140,25 @@ class ExtremeThroughputScenario(Scenario):
         self.scenario_name = "Extreme_Throughput"
         
         
-    def run(self) -> List[Message]:
+    def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
-        for _ in range(1000):
+        start_time = datetime.now()
+        for _ in range(10000):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
             self.benchmark_utils.message_queue.produce(messages)
+            time.sleep(0.01)
+
+        while self.benchmark_utils.message_queue.is_consuming():
+            time.sleep(0.1)
+        end_time = datetime.now()
+        time_taken = (end_time - start_time).total_seconds()
+        print(f"Time taken: {time_taken}")
+        self.benchmark_utils.message_queue.running = False
+
+        total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
+        average_latency = self.benchmark_utils.message_queue.get_average_latency()
+
+        return total_consumed_messages, average_latency, time_taken
+            

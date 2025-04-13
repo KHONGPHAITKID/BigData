@@ -1,6 +1,6 @@
 from message_queue.interface import MessageQueueBase
 from typing import List, Dict, Any
-from benchmark.scenario import Scenario, LowThroughputScenario, MediumThroughputScenario, HighThroughputScenario, ConsumerDisconnectScenario
+from benchmark.scenario import Scenario, LowThroughputScenario, MediumThroughputScenario, HighThroughputScenario, ConsumerDisconnectScenario, ExtremeThroughputScenario
 from benchmark.utils import BenchmarkUtils
 
 class Benchmark:
@@ -16,10 +16,11 @@ class Benchmark:
 
     def run(self):
         list_of_scenarios = [
-            LowThroughputScenario(self.utils),
-            MediumThroughputScenario(self.utils),
-            HighThroughputScenario(self.utils),
+            # LowThroughputScenario(self.utils),
+            # MediumThroughputScenario(self.utils),
+            # HighThroughputScenario(self.utils),
             # ConsumerDisconnectScenario(self.utils),
+            ExtremeThroughputScenario(self.utils),
         ]
         message_queue = self.utils.message_queue
         
@@ -27,31 +28,10 @@ class Benchmark:
             message_queue.connect()
             print(f"Running {scenario.scenario_name}")
             self.scenario = scenario
-            messages = self.scenario.run()
-
-            latency_list = []
-            if messages:
-                for message in messages:
-                    if message.produce_time and message.consume_time:
-                        latency_list.append((message.consume_time - message.produce_time).total_seconds())
-                if latency_list:
-                    avg_latency = sum(latency_list) / len(latency_list)
-                    print(f"Average latency: {avg_latency:.6f} seconds")
-
-                # print the latency list
-                with open(f"benchmark/logs/{message_queue.name}_{self.scenario.scenario_name}_latency_list.txt", "w") as f:
-                    for latency in latency_list:
-                        f.write(f"{latency}\n")
-                    
-                    f.write(f"Average latency: {avg_latency:.6f} seconds\n")
-
-                    # Calculate P90
-                    p90_latency = sorted(latency_list)[int(0.9 * len(latency_list))]
-                    print(f"P90 latency: {p90_latency:.6f} seconds")
-                    f.write(f"P90 latency: {p90_latency:.6f} seconds")
-                
-            else:
-                print("No messages to calculate latency")
+            total_message, latency, time_taken = self.scenario.run()
+            print(f"{self.scenario.scenario_name} complete. Total message: {total_message}, latency: {latency}, time_taken: {time_taken}")
+            with open(f"benchmark/logs/{message_queue.name}_{self.scenario.scenario_name}_latency_list.txt", "w") as f:
+                f.write(f"Total message: {total_message}, latency: {latency}, time_taken: {time_taken}")
 
             print("================================================")
             message_queue.close()

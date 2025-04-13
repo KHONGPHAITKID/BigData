@@ -11,7 +11,7 @@ class BenchmarkUtils:
         self.message_queue = message_queue
 
     def create_payload(self, size: int, produce_time: datetime) -> List[Message]:
-        return [Message(id=str(uuid.uuid4()), content=str(uuid.uuid4()), produce_time=produce_time, consume_time=None, data=self.payload) for _ in range(size)]
+        return [Message(id=str(uuid.uuid4()), content=str(uuid.uuid4()), produce_time=produce_time, consume_time=None) for _ in range(size)]
         
     
         

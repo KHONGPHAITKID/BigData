@@ -1,6 +1,7 @@
 import pika
 import json
 import logging
+import base64
 from message_queue.interface import MessageQueueBase, Message
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -34,7 +35,9 @@ class RabbitMQ(MessageQueueBase):
         self.channel_connections = []
 
         # Message tracking
-        self.messages = [[] for _ in range(self.num_queues + 1)]
+        # self.latency = [[] for _ in range(self.num_queues + 1)]
+        self.latency = defaultdict(float)
+        self.consumer_active = defaultdict(bool)
         self.message_count = defaultdict(int)
         self.last_message_time = defaultdict(float)
 
@@ -235,8 +238,6 @@ class RabbitMQ(MessageQueueBase):
             return False
 
         try:
-            message_count = len(messages)
-            # print(f"Producing {message_count} messages")
             
             for idx, message in enumerate(messages):
                 message.produce_time = datetime.now()
@@ -273,12 +274,17 @@ class RabbitMQ(MessageQueueBase):
             return False
 
     def _serialize_datetime_fields(self, message_dict: Dict[str, Any]) -> None:
-        """Convert datetime objects to ISO format strings."""
+        """Convert datetime objects to ISO format strings and bytes to base64."""
+        # Convert datetime fields to ISO format
         for field in ['produce_time', 'consume_time']:
             if field in message_dict and isinstance(message_dict[field], datetime):
                 message_dict[field] = message_dict[field].isoformat()
+        
+        # Convert bytes to base64 string for JSON serialization
+        if 'data' in message_dict and isinstance(message_dict['data'], bytes):
+            message_dict['data'] = base64.b64encode(message_dict['data']).decode('utf-8')
 
-    def consume(self) -> List[Message]:
+    def consume(self):
         """Consume messages from all queues."""
         if not self.is_connected():
             print("Not connected")
@@ -290,11 +296,13 @@ class RabbitMQ(MessageQueueBase):
             self.consumer_threads = []
             self.stop_event.clear()
             self.running_consumers = len(self.channels)
+            self.consumer_count = len(self.channels)
 
             # Start consumer threads
             for i, channel in enumerate(self.channels):
                 channel_idx = i + 1
                 self.last_message_time[channel_idx] = None
+                self.consumer_active[channel_idx] = True
                 t = threading.Thread(
                     target=self._consume_channel,
                     args=(channel, channel_idx),
@@ -308,15 +316,22 @@ class RabbitMQ(MessageQueueBase):
             for i, t in enumerate(self.consumer_threads):
                 t.join(timeout=self.config.get('consume_timeout', 30))
 
-            # Process messages
-            # return self._process_messages()
         except Exception:
-            # return []
             pass
-        
-    def get_consumed_messages(self) -> List[Message]:
-        """Get the consumed messages."""
-        return self._process_messages()
+    
+    def get_total_consumed_messages(self) -> int:
+        """Get the total consumed messages."""
+        total_consumed_messages = 0
+        for _, channel_message_count in self.message_count.items():
+            total_consumed_messages += channel_message_count
+        return total_consumed_messages
+    
+    def get_average_latency(self) -> float:
+        """Get the average latency."""
+        total_latency = 0
+        for _, channel_latency in self.latency.items():
+            total_latency += channel_latency
+        return total_latency / self.get_total_consumed_messages()
 
     def _consume_channel(self, channel: pika.channel.Channel, channel_idx: int) -> None:
         """Consume messages from a specific channel."""
@@ -400,7 +415,9 @@ class RabbitMQ(MessageQueueBase):
                         print(f"Error checking connection status for consumer {channel_idx}: {e}")
                     
                     # Always decrement counter when exiting
-                    self.running_consumers -= 1
+                    if self.consumer_active[channel_idx]:
+                        self.running_consumers -= 1
+                        self.consumer_active[channel_idx] = False
                     break
                 
                 time.sleep(check_interval)
@@ -415,8 +432,6 @@ class RabbitMQ(MessageQueueBase):
         """Process incoming messages."""
         try:
             channel_idx = ch.channel_number
-            self.message_count[channel_idx] += 1
-            message_count = self.message_count[channel_idx]
             self.last_message_time[channel_idx] = time.time()
             # print(f"Received message #{message_count} from channel {channel_idx}")
 
@@ -429,66 +444,35 @@ class RabbitMQ(MessageQueueBase):
                     message_str = body
 
                 message_dict = json.loads(message_str)
-                message_dict['consume_time'] = datetime.now().isoformat()
+                consume_time = datetime.now()
+                produce_time = datetime.fromisoformat(message_dict['produce_time'])
+                
+                # Calculate time difference in seconds before updating the message
+                time_diff = (consume_time - produce_time).total_seconds()
+                self.latency[channel_idx] += time_diff
+                
+                # Update the message with string version for storage
+                message_dict['consume_time'] = consume_time.isoformat()
+                
+                # If we need to convert base64 data back to bytes, do it here
+                # if 'data' in message_dict and isinstance(message_dict['data'], str):
+                #     try:
+                #         message_dict['data'] = base64.b64decode(message_dict['data'])
+                #     except:
+                #         # Keep it as is if it's not valid base64
+                #         pass
+                randNumber = random.randint(0, 100)
+                if randNumber <= self.sample_log_rate:
+                    print(f"Channel {channel_idx} consumed {self.message_count[channel_idx]} messages")
+                self.message_count[channel_idx] += 1
 
-                # Reserialize the message with the updated consume_time
-                # updated_body = json.dumps(message_dict).encode('utf-8')
-                # self.messages[channel_idx].append(updated_body)
-                self.latencies[channel_idx] = message_dict['consume_time'] - message_dict['produce_time']
-                # Debug message contents (first 50 chars)
-                # first_50 = message_str[:50] + "..." if len(message_str) > 50 else message_str
-                # print(f"Message content: {first_50}")
             except Exception as e:
                 print(f"Error processing message: {e}")
-                # If we can't update the consume_time, store the original message
-                # self.messages[channel_idx].append(body)
 
             return body
         except Exception as e:
             print(f"Callback error: {e}")
             return body
-
-    def _process_messages(self) -> List[Message]:
-        """Process received messages into Message objects."""
-        result = []
-        for channel_idx, channel_messages in enumerate(self.messages):
-            for message in channel_messages:
-                try:
-                    # Ensure message is properly decoded
-                    if isinstance(message, bytes):
-                        message_str = message.decode('utf-8')
-                    else:
-                        message_str = message
-
-                    # Parse JSON and create Message object
-                    message_dict = json.loads(message_str)
-
-                    # Convert ISO format string to datetime if needed
-                    # Convert consume_time from ISO format string to datetime if needed
-                    if isinstance(message_dict.get('consume_time'), str):
-                        try:
-                            message_dict['consume_time'] = datetime.fromisoformat(message_dict['consume_time'])
-                        except ValueError:
-                            # If parsing fails, use current time
-                            print("Failed to parse consume_time")
-                            message_dict['consume_time'] = datetime.now()
-
-                    # Convert produce_time from ISO format string to datetime if needed
-                    if isinstance(message_dict.get('produce_time'), str):
-                        try:
-                            message_dict['produce_time'] = datetime.fromisoformat(message_dict['produce_time'])
-                        except ValueError:
-                            # If parsing fails, use current time
-                            print("Failed to parse produce_time")
-                            message_dict['produce_time'] = None
-
-                    result.append(Message.from_dict(message_dict))
-                except (TypeError, json.JSONDecodeError):
-                    pass
-
-        # Clear messages after processing
-        self.messages = [[] for _ in range(self.num_queues + 1)]
-        return result
 
     def close(self) -> bool:
         """Close all connections to RabbitMQ."""
@@ -608,9 +592,58 @@ class RabbitMQ(MessageQueueBase):
 
             is_connected = publisher_ok and channels_ok and self.connected
             if not is_connected:
-                print(f"Connection status check: publisher={publisher_ok}, channels={channels_ok}, self.connected={self.connected}")
+                print(f"Connection status check: publisher={publisher_ok}, channels={channels_ok}, self.connected={self.connected}, open_channels={open_channels}")
             
             return is_connected
         except Exception as e:
             print(f"Error checking connection status: {e}")
             return False
+        
+    def get_open_channels(self) -> int:
+        """Get the number of open channels."""
+        return sum(1 for channel in self.channels if channel and channel.is_open)
+
+    def stop_consumer(self, index: int) -> None:
+        """
+        Stop a specific consumer by index.
+        
+        Args:
+            index: The consumer index (0-based) to stop
+        """
+        if not self.connected or index < 0 or index >= len(self.channels):
+            return
+        
+        try:
+            # Convert 0-based index to 1-based channel_idx (used for logging and tracking)
+            channel_idx = index + 1
+            
+            # Check if channel is open and active
+            if (index < len(self.channel_connections) and 
+                index < len(self.channels) and
+                self.channel_connections[index].is_open and
+                self.channels[index].is_open):
+                
+                print(f"Stopping consumer {index}")
+                
+                # Stop consuming
+                try:
+                    self.channels[index].stop_consuming()
+                    print(f"Stopped consuming on channel {channel_idx}")
+                except Exception as e:
+                    print(f"Error stopping consumer {channel_idx}: {e}")
+                
+                # Close channel and connection
+                try:
+                    self.channels[index].close()
+                    self.channel_connections[index].close()
+                    print(f"Closed channel {channel_idx} and its connection")
+                except Exception as e:
+                    print(f"Error closing channel {channel_idx}: {e}")
+                
+                # Decrement running consumers count
+                if self.consumer_active[channel_idx]:
+                    self.running_consumers -= 1
+                    self.consumer_active[channel_idx] = False
+                
+        except Exception as e:
+            print(f"Error in stop_consumer for index {index}: {e}")

@@ -7,6 +7,7 @@ from benchmark.benchmark import Benchmark
 from message_queue.factory import MessageQueueFactory
 from message_queue.rabbitmq import RABBIT
 from message_queue.kafka import KAFKA
+import argparse
 import os
 
 # Get broker address from environment variable, with fallback logic
@@ -20,7 +21,7 @@ if not kakfa_broker:
 # Configuration for Kafka (adjust as needed)
 config = {
     "kafka": {
-        "topic": "test_topic_3",
+        "topic": "test_topic_8",
         "partition": 5,
         "replication_factor": 1,
         "producer": {"bootstrap.servers": kafka_broker},
@@ -35,16 +36,22 @@ config = {
         'port': 5672,
         'username': 'guest',
         'password': 'guest',
-        'queue': 'test_queue',
+        'queue': 'extreme_throughput_queue_test',
         'num_queues': 1,
     }
 }
 
 if __name__ == "__main__":
     
+    # Create argument parser
+    parser = argparse.ArgumentParser(description='Run message queue benchmark')
+    parser.add_argument('--queue', type=str, choices=[KAFKA, RABBIT], default=KAFKA,
+                        help='Message queue type to use (kafka or rabbitmq)')
+    args = parser.parse_args()
+    
     message_queue_factory = MessageQueueFactory(config)
-    message_queue = message_queue_factory.create_message_queue(RABBIT)
+    message_queue = message_queue_factory.create_message_queue(message_queue_type=args.queue)
        
     bench = Benchmark()
-    bench.set_message_queue(message_queue)    
+    bench.set_message_queue(message_queue)
     bench.run()
