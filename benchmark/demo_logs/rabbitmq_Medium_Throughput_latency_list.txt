@@ -1,0 +1,1 @@
+Total message: 10000, latency: 0.0005112900018692017, e2e_latency: 5.112900018692017

@@ -21,7 +21,7 @@ if not kakfa_broker:
 # Configuration for Kafka (adjust as needed)
 config = {
     "kafka": {
-        "topic": "test_topic_9",
+        "topic": "test_topic_10",
         "partition": 5,
         "replication_factor": 1,
         "producer": {"bootstrap.servers": kafka_broker},

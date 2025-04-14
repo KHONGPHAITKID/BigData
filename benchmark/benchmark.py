@@ -31,7 +31,7 @@ class Benchmark:
             total_message, _, e2e_latency = self.scenario.run()
             average_latency = e2e_latency / total_message
             print(f"{self.scenario.scenario_name} complete. Total message: {total_message}, latency: {average_latency}, e2e_latency: {e2e_latency}")
-            with open(f"benchmark/final_logs/{message_queue.name}_{self.scenario.scenario_name}_latency_list.txt", "w") as f:
+            with open(f"benchmark/demo_logs/{message_queue.name}_{self.scenario.scenario_name}_latency_list.txt", "w") as f:
                 f.write(f"Total message: {total_message}, latency: {average_latency}, e2e_latency: {e2e_latency}")
 
             print("================================================")

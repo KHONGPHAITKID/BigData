@@ -21,7 +21,7 @@ logger.disabled = True
 
 class RabbitMQ(MessageQueueBase):
     def __init__(self, config: Dict[str, Any]):
-        super().__init__(RABBIT + "_single_queue")
+        super().__init__(RABBIT)
         self.config = config
         self.queue = config['queue']
         self.num_queues = config['num_queues']
@@ -315,8 +315,8 @@ class RabbitMQ(MessageQueueBase):
                 self.consumer_threads.append(t)
 
             # Wait for all threads to complete
-            for i, t in enumerate(self.consumer_threads):
-                t.join(timeout=self.config.get('consume_timeout', 30))
+            # for i, t in enumerate(self.consumer_threads):
+            #     t.join(timeout=self.config.get('consume_timeout', 30))
 
         except Exception:
             pass
