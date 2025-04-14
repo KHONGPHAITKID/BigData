@@ -21,7 +21,7 @@ logger.disabled = True
 
 class RabbitMQ(MessageQueueBase):
     def __init__(self, config: Dict[str, Any]):
-        super().__init__(RABBIT)
+        super().__init__(RABBIT + "_single_queue")
         self.config = config
         self.queue = config['queue']
         self.num_queues = config['num_queues']
@@ -40,6 +40,7 @@ class RabbitMQ(MessageQueueBase):
         self.consumer_active = defaultdict(bool)
         self.message_count = defaultdict(int)
         self.last_message_time = defaultdict(float)
+        self.first_message_time = defaultdict(float)
 
         # Thread management
         self.consumer_threads = []
@@ -64,12 +65,10 @@ class RabbitMQ(MessageQueueBase):
                 self.config.get('username', 'guest'),
                 self.config.get('password', 'guest')
             ),
-            heartbeat=self.config.get('heartbeat', 30),  # Lower heartbeat interval for faster detection
-            connection_attempts=self.config.get('connection_attempts', 5),  # More connection attempts
-            retry_delay=self.config.get('retry_delay', 2),  # Faster retry
-            socket_timeout=self.config.get('socket_timeout', 15),  # Longer socket timeout
-            blocked_connection_timeout=self.config.get('blocked_connection_timeout', 10),  # Add blocked connection timeout
-            client_properties={'connection_name': f'rabbitmq-client-{random.randint(1000, 9999)}'}  # Add client properties for better tracking
+            heartbeat=self.config.get('heartbeat', 60),
+            connection_attempts=self.config.get('connection_attempts', 3),
+            retry_delay=self.config.get('retry_delay', 5),
+            socket_timeout=self.config.get('socket_timeout', 10)
         )
 
     def _initialize_publisher(self) -> bool:
@@ -183,15 +182,15 @@ class RabbitMQ(MessageQueueBase):
         # Initialize channels
         # print("Initializing channels")
         if not self._initialize_channels():
-            print("Failed to initialize channels")
-            # Clean up publisher connection
-            try:
-                if self.publisher and self.publisher.is_open:
-                    self.publisher.close()
-                if self.publisher_connection and self.publisher_connection.is_open:
-                    self.publisher_connection.close()
-            except Exception as e:
-                print(f"Error closing publisher during failed connect: {e}")
+            # print("Failed to initialize channels")
+            # # Clean up publisher connection
+            # try:
+            #     if self.publisher and self.publisher.is_open:
+            #         self.publisher.close()
+            #     if self.publisher_connection and self.publisher_connection.is_open:
+            #         self.publisher_connection.close()
+            # except Exception as e:
+            #     print(f"Error closing publisher during failed connect: {e}")
             return False
 
         # Set up queues
@@ -216,9 +215,10 @@ class RabbitMQ(MessageQueueBase):
                 self.last_message_time[i+1] = time.time()
                 successful_queues += 1
 
-            if successful_queues > 0 and all(channel.is_open for channel in self.channels if channel):
+            # if successful_queues > 0 and all(channel.is_open for channel in self.channels if channel):
+            if all(channel.is_open for channel in self.channels):
                 self.connected = True
-                # print(f"Successfully connected to RabbitMQ with {successful_queues} queues")
+                print(f"Successfully connected to RabbitMQ with {successful_queues} queues")
                 return True
             else:
                 # print(f"Some or all channels failed to open. Successful queues: {successful_queues}")
@@ -302,7 +302,9 @@ class RabbitMQ(MessageQueueBase):
             for i, channel in enumerate(self.channels):
                 channel_idx = i + 1
                 self.last_message_time[channel_idx] = None
+                self.first_message_time[channel_idx] = None
                 self.consumer_active[channel_idx] = True
+                self.message_count[channel_idx] = 0
                 t = threading.Thread(
                     target=self._consume_channel,
                     args=(channel, channel_idx),
@@ -351,13 +353,13 @@ class RabbitMQ(MessageQueueBase):
         except pika.exceptions.AMQPConnectionError as e:
             print(f"AMQP Connection Error in consumer {channel_idx}: {e}")
             # Mark the last message time to trigger timeout
-            self.last_message_time[channel_idx] = 0
+            # self.last_message_time[channel_idx] = 0
         except pika.exceptions.ConnectionClosedByBroker as e:
             print(f"Connection closed by broker in consumer {channel_idx}: {e}")
-            self.last_message_time[channel_idx] = 0
+            # self.last_message_time[channel_idx] = 0
         except Exception as e:
             print(f"Unexpected error in consumer {channel_idx}: {e}")
-            self.last_message_time[channel_idx] = 0
+            # self.last_message_time[channel_idx] = 0
         finally:
             try:
                 monitor_thread.join(timeout=2)
@@ -433,6 +435,8 @@ class RabbitMQ(MessageQueueBase):
         try:
             channel_idx = ch.channel_number
             self.last_message_time[channel_idx] = time.time()
+            if self.first_message_time[channel_idx] is None:
+                self.first_message_time[channel_idx] = time.time()
             # print(f"Received message #{message_count} from channel {channel_idx}")
 
             # Add current timestamp to the message as consume_time
@@ -647,3 +651,59 @@ class RabbitMQ(MessageQueueBase):
                 
         except Exception as e:
             print(f"Error in stop_consumer for index {index}: {e}")
+
+
+    def get_e2e_latency(self) -> float:
+        """
+        Get the total time taken for the queue to consume messages.
+        """
+        try:
+            # Find earliest first_message_time and latest last_message_time across all channels
+            min_first_time = None
+            max_last_time = None
+            
+            print(f"Calculating e2e latency with {len(self.first_message_time)} first timestamps and {len(self.last_message_time)} last timestamps")
+            
+            # First get the minimum first message time
+            for channel_idx, first_time in self.first_message_time.items():
+                print(f"Channel {channel_idx} first message time: {first_time}")
+                if first_time is not None:
+                    if min_first_time is None or first_time < min_first_time:
+                        min_first_time = first_time
+            
+            # Then get the maximum last message time
+            for channel_idx, last_time in self.last_message_time.items():
+                print(f"Channel {channel_idx} last message time: {last_time}")
+                if last_time is not None:
+                    if max_last_time is None or last_time > max_last_time:
+                        max_last_time = last_time
+            
+            print(f"Min first time: {min_first_time}, Max last time: {max_last_time}")
+            
+            # Calculate the time difference if both timestamps are valid
+            if min_first_time is not None and max_last_time is not None:
+                time_diff = max_last_time - min_first_time
+                print(f"E2E latency: {time_diff} seconds")
+                return time_diff
+            else:
+                print("Cannot calculate e2e latency: missing timestamps")
+                return 0
+        except Exception as e:
+            print(f"Error calculating e2e latency: {e}")
+            return 0
+        
+    def get_min_first_message_time(self) -> datetime:
+        """
+        Get the minimum first message time.
+        """
+        min_first_time = None
+        for channel_idx, first_time in self.first_message_time.items():
+            if first_time is not None:
+                if min_first_time is None or first_time < min_first_time:
+                    min_first_time = first_time
+        
+        # Based on the context, it appears first_time is already a datetime object
+        # If it were time.time() (float), we would convert it like this:
+        # if min_first_time is not None:
+        return datetime.fromtimestamp(min_first_time)    
+    

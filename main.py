@@ -21,7 +21,7 @@ if not kakfa_broker:
 # Configuration for Kafka (adjust as needed)
 config = {
     "kafka": {
-        "topic": "test_topic_8",
+        "topic": "test_topic_9",
         "partition": 5,
         "replication_factor": 1,
         "producer": {"bootstrap.servers": kafka_broker},
@@ -36,8 +36,8 @@ config = {
         'port': 5672,
         'username': 'guest',
         'password': 'guest',
-        'queue': 'extreme_throughput_queue_test',
-        'num_queues': 1,
+        'queue': 'queue_video',
+        'num_queues': 5,
     }
 }
 

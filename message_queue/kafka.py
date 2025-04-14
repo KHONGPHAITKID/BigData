@@ -25,6 +25,8 @@ class ConsumerWrapper:
         self.max_empty_polls = 3  # Number of consecutive empty polls to consider as reached end
         self.idle_timeout = 10  # Default idle timeout in seconds
         self.last_message_time = None
+        self.first_message_time = None
+        self.last_message_time = None
 
 
 
@@ -157,6 +159,10 @@ class KafkaMessageQueue(MessageQueueBase):
                     produce_time=produce_time,
                     consume_time=consume_time
                 )
+                if consumer.first_message_time is None:
+                    consumer.first_message_time = produce_time
+                consumer.last_message_time = consume_time
+
                 consumer.total_consumed_messages += 1
                 consumer.latency += (consume_time - produce_time).total_seconds()
                 randNumber = random.randint(0, 100)
@@ -181,6 +187,14 @@ class KafkaMessageQueue(MessageQueueBase):
         logging.info(f"Consumer loop for {threading.current_thread().name} terminated")
         print(f"Consumer loop for {threading.current_thread().name} terminated")
         self.running_consumers -= 1
+
+    def get_e2e_latency(self) -> float:
+        """
+        Get the total time taken for the queue to consume messages.
+        """
+        min_first_message_time = min(consumer.first_message_time for consumer in self.consumers)
+        max_last_message_time = max(consumer.last_message_time for consumer in self.consumers)
+        return (max_last_message_time - min_first_message_time).total_seconds()
 
     def produce(self, messages: List[Message]) -> bool:
         """
@@ -356,3 +370,15 @@ class KafkaTopicManager:
         Check if topic exists in the cluster.
         """
         return topic_name in self.admin_client.list_topics().topics
+
+    def get_min_first_message_time(self) -> datetime:
+        """
+        Get the minimum first message time.
+        """
+        return min(consumer.first_message_time for consumer in self.consumers)
+
+    def get_max_last_message_time(self) -> datetime:
+        """
+        Get the maximum last message time.
+        """
+        return max(consumer.last_message_time for consumer in self.consumers)

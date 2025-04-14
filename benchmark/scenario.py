@@ -27,8 +27,7 @@ class LowThroughputScenario(Scenario):
 
     def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
-
-        start_time = datetime.now()
+        print("Hello world")
         for _ in range(50):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=10, produce_time=produce_time)
@@ -37,13 +36,16 @@ class LowThroughputScenario(Scenario):
         while self.benchmark_utils.message_queue.is_consuming():
             time.sleep(0.1)
         end_time = datetime.now()
-        time_taken = (end_time - start_time).total_seconds()
-        print(f"Time taken: {time_taken}")
+
+        self.benchmark_utils.message_queue.running = False
         
         total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
         average_latency = self.benchmark_utils.message_queue.get_average_latency()
+        e2e_latency = self.benchmark_utils.message_queue.get_e2e_latency()
+        if e2e_latency == 0:
+            e2e_latency = (end_time - self.benchmark_utils.message_queue.get_min_first_message_time()).total_seconds()
 
-        return total_consumed_messages, average_latency, time_taken
+        return total_consumed_messages, average_latency, e2e_latency
     
 class MediumThroughputScenario(Scenario):
 
@@ -54,7 +56,6 @@ class MediumThroughputScenario(Scenario):
     def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
-        start_time = datetime.now()
         # Higher message count and larger batch size for high throughput
         for _ in range(200):  # Increased from 50 to 200 iterations
             produce_time = datetime.now()
@@ -65,14 +66,15 @@ class MediumThroughputScenario(Scenario):
         while self.benchmark_utils.message_queue.is_consuming():    
             time.sleep(0.1)
         end_time = datetime.now()
-        time_taken = (end_time - start_time).total_seconds()
-        print(f"Time taken: {time_taken}")
-        # consumed_messages = self.benchmark_utils.message_queue.get_consumed_messages()
-        # print(f"Medium throughput benchmark complete. Consumed {len(consumed_messages)} messages.")
+
+        self.benchmark_utils.message_queue.running = False
         total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
         average_latency = self.benchmark_utils.message_queue.get_average_latency()
+        e2e_latency = self.benchmark_utils.message_queue.get_e2e_latency()
+        if e2e_latency == 0:
+            e2e_latency = (end_time - self.benchmark_utils.message_queue.get_min_first_message_time()).total_seconds()
 
-        return total_consumed_messages, average_latency, time_taken
+        return total_consumed_messages, average_latency, e2e_latency
     
 class HighThroughputScenario(Scenario):
     def __init__(self, benchmark_utils: BenchmarkUtils = None):
@@ -82,7 +84,6 @@ class HighThroughputScenario(Scenario):
     def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
-        start_time = datetime.now()
         for _ in range(1000):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
@@ -92,12 +93,15 @@ class HighThroughputScenario(Scenario):
         while self.benchmark_utils.message_queue.is_consuming():
             time.sleep(0.1)
         end_time = datetime.now()
-        time_taken = (end_time - start_time).total_seconds()
-        print(f"Time taken: {time_taken}")
+
+        self.benchmark_utils.message_queue.running = False
         total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
         average_latency = self.benchmark_utils.message_queue.get_average_latency()
+        e2e_latency = self.benchmark_utils.message_queue.get_e2e_latency()
+        if e2e_latency == 0:
+            e2e_latency = (end_time - self.benchmark_utils.message_queue.get_min_first_message_time()).total_seconds()
 
-        return total_consumed_messages, average_latency, time_taken
+        return total_consumed_messages, average_latency, e2e_latency
     
 
 class ConsumerDisconnectScenario(Scenario):
@@ -108,7 +112,6 @@ class ConsumerDisconnectScenario(Scenario):
     def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
-        start_time = datetime.now()
         for index in range(1000):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
@@ -122,15 +125,16 @@ class ConsumerDisconnectScenario(Scenario):
         while self.benchmark_utils.message_queue.is_consuming():
             time.sleep(0.1)
         end_time = datetime.now()
-        time_taken = (end_time - start_time).total_seconds()
-        print(f"Time taken: {time_taken}")
         
         self.benchmark_utils.message_queue.running = False
       
         total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
         average_latency = self.benchmark_utils.message_queue.get_average_latency()
+        e2e_latency = self.benchmark_utils.message_queue.get_e2e_latency()
+        if e2e_latency == 0:
+            e2e_latency = (end_time - self.benchmark_utils.message_queue.get_min_first_message_time()).total_seconds()
 
-        return total_consumed_messages, average_latency, time_taken
+        return total_consumed_messages, average_latency, e2e_latency
         
             
 
@@ -143,7 +147,6 @@ class ExtremeThroughputScenario(Scenario):
     def run(self) -> Tuple[int, float, float]:
         self.benchmark_utils.message_queue.consume()
 
-        start_time = datetime.now()
         for _ in range(10000):
             produce_time = datetime.now()
             messages = self.benchmark_utils.create_payload(size=100, produce_time=produce_time)
@@ -153,12 +156,14 @@ class ExtremeThroughputScenario(Scenario):
         while self.benchmark_utils.message_queue.is_consuming():
             time.sleep(0.1)
         end_time = datetime.now()
-        time_taken = (end_time - start_time).total_seconds()
-        print(f"Time taken: {time_taken}")
         self.benchmark_utils.message_queue.running = False
 
         total_consumed_messages = self.benchmark_utils.message_queue.get_total_consumed_messages()
         average_latency = self.benchmark_utils.message_queue.get_average_latency()
+        e2e_latency = self.benchmark_utils.message_queue.get_e2e_latency()
 
-        return total_consumed_messages, average_latency, time_taken
+        if e2e_latency == 0:
+            e2e_latency = (end_time - self.benchmark_utils.message_queue.get_min_first_message_time()).total_seconds()
+
+        return total_consumed_messages, average_latency, e2e_latency
             

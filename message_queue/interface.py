@@ -46,7 +46,7 @@ class MessageQueueBase(ABC):
         self.consumer_count = -1
         self.name = name
         self.running_consumers = 0
-        self.sample_log_rate = 5
+        self.sample_log_rate = 100
     
     @abstractmethod
     def connect(self) -> bool:
@@ -151,3 +151,21 @@ class MessageQueueBase(ABC):
         """
         return self.running_consumers > 0
         
+    def get_e2e_latency(self) -> float:
+        """
+        Get the total time taken for the queue to consume messages.
+        """
+        pass
+
+    def get_min_first_message_time(self) -> datetime:
+        """
+        Get the minimum first message time.
+        """
+        pass
+    
+    def get_max_last_message_time(self) -> datetime:
+        """
+        Get the maximum last message time.
+        """
+        pass
+    
