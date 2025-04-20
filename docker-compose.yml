@@ -38,6 +38,7 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - kafka
+      - rabbitmq
     volumes:
       - .:/app
     environment:
