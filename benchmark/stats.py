@@ -90,6 +90,7 @@ class Stats:
                 f.write(f"{value} {timestamp}\n")
 
     def draw_histogram(self, key: str, filename: str = None):
+        return
         """
         Generate and save a line plot of the statistics over time.
         

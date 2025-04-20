@@ -12,6 +12,7 @@ class Message:
     content: Any
     produce_time: datetime
     consume_time: datetime
+    data: bytes = b'\x00' * (10 * 1024)  # Default value of 10KB
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary for serialization."""
@@ -19,7 +20,8 @@ class Message:
             "id": self.id,
             "content": self.content,
             "produce_time": self.produce_time,
-            "consume_time": self.consume_time
+            "consume_time": self.consume_time,
+            "data": self.data
         }
     
     @classmethod
@@ -29,7 +31,8 @@ class Message:
             id=data.get("id", ""),
             content=data.get("content"),
             produce_time=data.get("produce_time"),
-            consume_time=data.get("consume_time")
+            consume_time=data.get("consume_time"),
+            data=data.get("data", b'\x00' * (10 * 1024))
         )
 
 
@@ -37,12 +40,16 @@ class MessageQueueBase(ABC):
     """
     Base class for message queue implementations
     """
-    def __init__(self):
+    def __init__(self, name: str):
         self.connected = False
         self.stats = None
+        self.consumer_count = -1
+        self.name = name
+        self.running_consumers = 0
+        self.sample_log_rate = 1
     
     @abstractmethod
-    def connect(self, config: Dict[str, Any]) -> bool:
+    def connect(self) -> bool:
         """
         Connect to the message queue service.
         
@@ -68,7 +75,7 @@ class MessageQueueBase(ABC):
         pass
 
     @abstractmethod
-    def consume(self) -> List[Message]:
+    def consume(self):
         """
         Consume messages from the queue.
         
@@ -115,3 +122,50 @@ class MessageQueueBase(ABC):
             bool: True if connected, False otherwise
         """
         return self.connected
+
+    def stop_consumer(self, index: int) -> None:
+        """
+        Stop a consumer.
+        """
+        
+        pass
+
+    def get_total_consumed_messages(self) -> int:
+        """
+        Get the total consumed messages.
+        """
+        pass
+        
+    def get_average_latency(self) -> float:
+        """
+        Get the average latency.
+        """
+        pass
+
+    def get_num_consumed_messages(self) -> int:
+        pass
+
+    def is_consuming(self) -> bool:
+        """
+        Check if the queue is consuming messages.
+        """
+        return self.running_consumers > 0
+        
+    def get_e2e_latency(self) -> float:
+        """
+        Get the total time taken for the queue to consume messages.
+        """
+        pass
+
+    def get_min_first_message_time(self) -> datetime:
+        """
+        Get the minimum first message time.
+        """
+        pass
+    
+    def get_max_last_message_time(self) -> datetime:
+        """
+        Get the maximum last message time.
+        """
+        pass
+    
