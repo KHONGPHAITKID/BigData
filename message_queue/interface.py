@@ -46,7 +46,7 @@ class MessageQueueBase(ABC):
         self.consumer_count = -1
         self.name = name
         self.running_consumers = 0
-        self.sample_log_rate = 100
+        self.sample_log_rate = 1
     
     @abstractmethod
     def connect(self) -> bool:

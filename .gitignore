@@ -6,4 +6,3 @@ benchmark/__pycache__/
 message_queue/__pycache__/
 benchmark/visualize_benchmark.py
 benchmark/final_logs/
-benchmark/images/
